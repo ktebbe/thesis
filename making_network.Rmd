@@ -1,0 +1,159 @@
+---
+title: "making the network"
+output: word_document
+---
+Remaking "adj" (copied code from similarity network.R).
+```{r, eval=FALSE}
+setwd("~/Box Sync/senior fall/Math Thesis")
+courses <- read.csv("newCourses.csv", as.is=T)
+courses <- courses[,-1]
+
+n <- nrow(courses)
+adj <- matrix (NA, nrow=n, ncol=n)
+rownames(adj) <- courses$Dept1
+colnames(adj) <- courses$Dept1
+
+for(row in 1:(n-1)){
+  rowList <- unlist(strsplit(courses$Keywords[row], " "))
+  for(col in (row+1):n){
+    if(row == col) next
+     colList <- unlist(strsplit(courses$Keywords[col], " "))
+     if((length(intersect(rowList, colList)) / length(union(rowList, colList))) == 1){
+       adj[row, col] <- NA
+       adj[col, row] <- NA
+     } else{
+       adj[row, col] <- length(intersect(rowList, colList)) / length(union(rowList, colList))
+       adj[col, row] <- length(intersect(rowList, colList)) / length(union(rowList, colList))
+     }
+     
+  }
+}
+
+```
+
+
+Looking at isolated nodes - who are they?
+```{r, eval=FALSE}
+Adj <- adj >= 0.08
+net <- graph_from_adjacency_matrix(Adj, mode="undirected")
+
+which(degree(net) == 0)
+which(degree(net) == 1)
+
+sum(degree(net)==0)
+sum(degree(net)==1)
+
+## and super connected!
+which(degree(net) > 50) #MORE LANGUAGE CLASSES!
+
+```
+
+Use adj to add edges (to those with degree 0 or 1) so all nodes are connected to at least two others (ensures game is playable & always possible to win).
+```{r, eval=FALSE}
+Adj <- adj >= 0.08
+net <- graph_from_adjacency_matrix(Adj, mode="undirected")
+
+## looking at network before
+l <- layout_with_fr(net)
+plot(net, layout=l,
+     vertex.size = 1,
+     vertex.label = "",
+     main = "Network Before Connecting Low Degree Nodes")
+
+###########
+
+lowDegree <- which(degree(net) <= 1)
+
+for(i in 1:length(lowDegree)){
+  vertexName <- names(lowDegree[i])
+  scores <- adj[vertexName,]
+  
+  ## if degree = 0
+  if(degree(net, v = vertexName) == 0){
+    edges <- names(sort(scores, decreasing=T)[1:2])
+    net <- add_edges(net, c(vertexName, edges[1]))
+    net <- add_edges(net, c(vertexName, edges[2]))
+  }
+  
+  ## if degree = 1
+  if(degree(net, v = vertexName) == 1){
+    ## make sure no duplicate edges! check neighbors names 
+    neighbor <- names(neighbors(net, v=vertexName))
+    edges <- names(sort(scores, decreasing=T))
+    if(edges[1] != neighbor){
+      net <- add_edges(net, c(vertexName, edges[1]))
+    }
+    else {
+      net <- add_edges(net, c(vertexName, edges[2]))
+    }
+  }
+  
+  ## if degree > 1 (bc already added edges)
+  ## do nothing!
+}
+
+## looking at network after
+l <- layout_with_fr(net)
+plot(net, layout=l,
+     vertex.size = 1,
+     vertex.label = "",
+     main = "Network After Connecting Low Degree Nodes")
+
+max(degree(net))
+
+```
+
+This removes edges from the nodes with degree larger than 11 to make sure that all have degree <= 11 and connected AND min degree is still 2.
+```{r, eval=FALSE}
+## try with certain seed
+testSeed <- 1
+
+## finding large nodes
+largeDegree <- names(which(degree(net) > 10))
+neighbors(net, v = largeDegree[99])
+
+## looping through and removing edges & checking connectivity
+for(i in 1:length(largeDegree)){
+  class <- largeDegree[i]
+  counter <- 0 ## counter to make sure no dead ends
+  
+  while(length(neighbors(net,v = class)) > 11){
+    counter <- counter + 1
+    if(counter > 68){
+      print("Completely stuck!")
+    }
+    testSeed <- testSeed + 1
+    set.seed(testSeed)
+    edgeName <- names(neighbors(net,v = class))[sample(length(neighbors(net,v = class)),1)]
+    test <- delete_edges(net, paste(class,"|",edgeName, sep=""))
+    
+    ## checking connectivity & min degree
+    if(is_connected(test) & min(degree(test)) == 2){
+      ## ok to permanently remove edge
+      net <- delete_edges(net, paste(class,"|",edgeName, sep=""))
+    }
+  }
+}
+
+## checking to make sure algorithm worked!
+# checking max degree
+max(degree(net))
+
+# checking min degree
+min(degree(net))
+
+# checking connectivity 
+is_connected(net)
+
+## looking at network after
+plot(net,
+     vertex.size = 1,
+     vertex.label = "",
+     main = "Network After Removing Excess Edges")
+
+
+## writing new network
+#write_graph(net, "finalNetwork.txt", format = "ncol")
+
+```
+

@@ -1,0 +1,97 @@
+---
+title: "adding by dist"
+output: word_document
+---
+
+First we will compute sum of distances for each node (total distance from it to all other nodes in base graph). This helps creates the normalization factor we will use later.
+
+Now do for all courses & store values in dataframe!
+```{r, eval=FALSE}
+library(igraph)
+net <- read_graph("network.txt", format = "ncol", directed=FALSE)
+N <- as.data.frame(matrix(NA, nrow = length(V(net)), ncol = 1))
+rownames(N) <- V(net)$name
+colnames(N) <- "Nu"
+
+mat <- distances(net)
+for(j in 1:length(V(net))){
+  class <- V(net)$name[j]
+  dists <- (1/mat[class,]) ** 2
+  total <- sum(dists[is.finite(dists)])
+  N[class,"Nu"] <- total
+}
+
+write.csv(N, "N.csv")
+```
+
+We'll add an edge between two nodes with a probability proportional to the normalization factor and distance.
+```{r, eval=FALSE}
+library(igraph)
+net <- read_graph("network.txt", format = "ncol", directed=FALSE)
+N <- read.csv("N.csv", as.is=T) 
+rownames(N) <- N[,1]
+
+mat <- distances(net) ** 2
+edgesBefore <- gsize(net)
+set.seed(3)
+for(i in 1:(length(V(net))-1)){
+  class <- V(net)$name[i]
+  Nu <- N[class, "Nu"]
+  
+  for(j in (i+1):(length(V(net)))){
+    class2 <- V(net)$name[j]
+    if(net[class, class2] != 0) { next } # skip is classes are already connected 
+    dist <- mat[class, class2]
+    
+    ## add edge w probability equal to 1/(Nu*dist)
+    if(as.logical(rbinom(1,size=1,prob=(1/(Nu*dist))))){
+      degrees <- degree(net)
+      ## check degree first
+      if(degrees[class] == 11){
+        #randomly remove an edge, making sure not to lower min degree
+        NOTDONE <- TRUE
+        while(NOTDONE){
+          index <- sample(c(1:11), 1)
+          test <- delete_edges(net, E(net)[from(class)][index])
+          if(min(degree(test)) == 2){
+            net <- delete_edges(net, E(net)[from(class)][index])
+            NOTDONE <- FALSE
+          }
+        }
+      }
+      if(degrees[class2] == 11){
+        NOTDONE <- TRUE
+        while(NOTDONE){
+          index <- sample(c(1:11), 1)
+          test <- delete_edges(net, E(net)[from(class2)][index])
+          if(min(degree(test)) == 2){
+            net <- delete_edges(net, E(net)[from(class2)][index])
+            NOTDONE <- FALSE
+          }
+        }
+      }
+      ## add an edge!
+      net <- add.edges(net, c(class, class2))
+    }
+  }
+  if(i%%100 == 0){
+    print(i)
+  }
+}
+
+edgesAfter <- gsize(net)
+
+## integrity checks
+min(degree(net)) == 2
+max(degree(net)) <= 11
+table(degree(net))
+
+edgesAfter - edgesBefore
+
+## write it!
+#write_graph(net, "networkDist.txt", "ncol")
+
+```
+
+
+

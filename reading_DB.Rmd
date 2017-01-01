@@ -1,0 +1,360 @@
+---
+title: "reading DB"
+output: word_document
+---
+
+Reading in the database.
+```{r}
+library(RMySQL)
+mydb = dbConnect(MySQL(), 
+                 user='ktebbe', 
+                 password='wordspassword', 
+                 dbname='words', 
+                 host='words.cl2itmibl6gz.us-west-2.rds.amazonaws.com')
+
+```
+
+looking at completed vs games given up
+```{r}
+# library(igraph)
+# setwd("~/Box Sync/senior fall/Math Thesis/Shiny smart")
+# net <- read_graph("networkDist.txt", format = "ncol", directed=FALSE)
+# tab <- dbReadTable(mydb, "network3")
+# 
+# # completedSessions <- tab[which(tab$choice == tab$target), "session_id"]
+# # uncompletedSessions <- setdiff(completedSessions, unique(tab$session_id))
+# # 
+# # ## validity check - WTFFF
+# # length(completedSessions) + length(uncompletedSessions) == length(unique(tab$session_id))
+# 
+# ## calculating direct path length (remove cycles)
+# ## func w session id as input
+# sub <- tab[which(tab$session_id == completedSessions[1]),]
+# sub <- sub[-which(sub$suggestion == 1),]
+# trueLength <- nrow(sub)
+# cycles <- sub$choice[duplicated(sub$choice)]
+# 
+# ## & remove suggestions
+# shortestPaths <- shortest.paths(net, v=V(net), to=V(net))
+# shortLength <- nrow(sub)
+# actualLength <- shortestPaths[sub[1,"source"], sub[1,"target"]]
+# 
+# degSource <- degree(net, sub[1,"source"])
+# degTarget <- degree(net, sub[1,"target"])
+
+```
+
+This function removes cycles from a single session. 
+```{r}
+removeCycles <- function(sub){
+  if(length(sub$choice[duplicated(sub$choice)]) > 0) {
+    KEEPGOING <- TRUE
+    index <- 1
+    while(KEEPGOING){
+      cycles <- sub$choice[duplicated(sub$choice)]
+      if(sub$choice[index] %in% cycles){
+        ## find rows with that cycle and slice from latest one
+        last <- max(which(sub$choice == sub$choice[index]))
+        sub <- sub[-seq(from = (index+1), to = last, by = 1),]
+      }
+      index <- index + 1
+      if(index > nrow(sub)){
+        KEEPGOING <- FALSE 
+      }
+    }
+  }
+  return(sub)
+}
+```
+
+This function corrects for any use of the "back" button.
+```{r}
+removeBacks <- function(sub){
+  ## if back == 1 -> remove it and row above
+  while(length(which(sub$back == 1)) > 0){
+    backs <- which(sub$back == 1)[1]
+    sub <- sub[-((backs-1):backs),]
+  }
+  return(sub)
+}
+```
+
+For each session, measure:
+-degree of source
+-degree of target
+-complete/incomplete
+-traveled path length (traveled by user)
+-cycle-free path length
+-actual path length (by network attributes)
+-number of "backs"
+-number of "cycles"
+
+
+```{r, eval=F}
+library(igraph)
+library(RMySQL)
+mydb = dbConnect(MySQL(), 
+                 user='ktebbe', 
+                 password='wordspassword', 
+                 dbname='words', 
+                 host='words.cl2itmibl6gz.us-west-2.rds.amazonaws.com')
+
+setwd("~/Box Sync/senior fall/Math Thesis/Shiny smart")
+netSmart <- read_graph("networkDist.txt", format = "ncol", directed=FALSE)
+tabSmart <- dbReadTable(mydb, "network3")
+
+setwd("~/Box Sync/senior fall/Math Thesis/Shiny random")
+netRandom <- read_graph("networkRandom.txt", format = "ncol", directed=FALSE)
+tabRandom <- dbReadTable(mydb, "network2")
+
+setwd("~/Box Sync/senior fall/Math Thesis/Shiny")
+netBase <- read_graph("network.txt", format = "ncol", directed=FALSE)
+tabBase <- dbReadTable(mydb, "network1")
+tabBase <- tabBase[-1,] # first row was a tester
+
+#########################
+
+analyzeTable <- function(net, tab){
+  df <- as.data.frame(matrix(NA, nrow = 1, ncol = 11))
+  colnames(df) <- c("session_id", "completed",
+                    "sourceDegree", "sourceName",
+                    "targetDegree", "targetName",
+                    "traveledPath", "cyclefree", "realPath",
+                    "backs", "duplicates")
+  shortestPaths <- shortest.paths(net, v=V(net), to=V(net))
+  deg <- degree(net)
+  idList <- unique(tab$session_id)
+  
+  for(i in 1:length(idList)){
+    id <- idList[i]
+    sub <- tab[which(tab$session_id == id), ]
+    sub <- sub[sub$suggestion != 1,]
+    ## fixing if they go back to first screen
+    bad_ones <- sub$choice == ""
+    sub$choice[bad_ones] <- sub$`source`[bad_ones]
+    
+    df[i, "session_id"] <- id
+    df[i, "backs"] <- length(which(sub$back == 1))
+    df[i, "duplicates"] <- length(unique(sub$choice[duplicated(sub$choice)]))
+    df[i, "realPath"] <- shortestPaths[sub[1,"source"], sub[1,"target"]]
+    df[i, "sourceDegree"] <- deg[sub[1,"source"]]
+    df[i, "sourceName"] <- sub[1,"source"]
+    df[i, "targetDegree"] <- deg[sub[1,"target"]]
+    df[i, "targetName"] <- sub[1,"target"]
+    df[i, "completed"] <- as.numeric(any(sub$choice == sub$target))
+    
+    sub <- removeBacks(sub)
+    df[i, "traveledPath"] <- nrow(sub)
+    sub <- removeCycles(sub)
+    df[i, "cyclefree"] <- nrow(sub)
+  }
+  return(df)
+}
+
+smartResults <- analyzeTable(netSmart, tabSmart)
+randomResults <- analyzeTable(netRandom, tabRandom)
+baseResults <- analyzeTable(netBase, tabBase)
+
+nrow(baseResults)
+nrow(randomResults)
+nrow(smartResults)
+
+```
+
+Visualization of completed vs incomplete for each network - barplot!
+```{r, eval=F}
+propBase <- length(which(baseResults$completed==1))/nrow(baseResults)
+propSmart <- length(which(smartResults$completed==1))/nrow(smartResults)
+propRandom <- length(which(randomResults$completed==1))/nrow(randomResults)
+
+# m <- matrix(c(propBase, 1-propBase, 
+#               propRandom, 1-propRandom,
+#               propSmart, 1-propSmart),
+#               ncol=3, nrow=2)
+m <- matrix(c(propBase, 
+              propRandom, 
+              propSmart),
+              ncol=3, nrow=1)
+colnames(m) <- c("Base", "Random", "Smart")
+b <- barplot(m, main = "Completion Rates For Each Network",
+        ylab = "Proportion of Games",
+        ylim = c(0,1))
+text(b, m[1,]-.04, paste(round(m[1,],2)),
+     col = "white")
+
+```
+
+Looking at mean degree of source/target in completed/uncompleted games.
+```{r, eval=F}
+s <- matrix(NA, ncol = 2, nrow = 6)
+colnames(s) <- c("Source Degree", "Target Degree")
+rownames(s) <- c("CompletedBase", "UncompletedBase", 
+                 "CompletedRandom", "UncompletedRandom",
+                 "CompletedSmart", "UncompletedSmart")
+
+s[1,] <- c(mean(baseResults$sourceDegree[baseResults$completed==1]),
+           mean(baseResults$targetDegree[baseResults$completed==1]))
+s[3,] <- c(mean(randomResults$sourceDegree[randomResults$completed==1]),
+           mean(randomResults$targetDegree[randomResults$completed==1]))
+s[5,] <- c(mean(smartResults$sourceDegree[smartResults$completed==1]),
+           mean(smartResults$targetDegree[smartResults$completed==1]))
+
+s[2,] <- c(mean(baseResults$sourceDegree[baseResults$completed==0]),
+           mean(baseResults$targetDegree[baseResults$completed==0]))
+s[4,] <- c(mean(randomResults$sourceDegree[randomResults$completed==0]),
+           mean(randomResults$targetDegree[randomResults$completed==0]))
+s[6,] <- c(mean(smartResults$sourceDegree[smartResults$completed==0]),
+           mean(smartResults$targetDegree[smartResults$completed==0]))
+
+newS <- matrix(rowMeans(s), nrow=2, ncol=3)
+colnames(newS) <- c("Base Network", "Random Network", "Smart Network")
+b <- barplot(newS, beside=T, main = "Game Completion by Mean Degree for Each Network",
+             ylab = "Mean Degree of Source & Target Vertices",
+             ylim = c(0,7), xlim = c(1,9))
+legend(x = .75, y = 7.2, c("Completed", "Not Completed"), pch = 15,
+       col = grey.colors(2), cex = .9, bty = 'n')
+```
+
+look at language classes as destination -- hard!!!!
+
+(betweenness?) centrality of source/target to predict success?
+
+As baseline, look at mean shortest path length in each network, separated by completed/not
+```{r, eval=F}
+avgPath <- function(results){
+  comp <- results[results$completed == 1, ]
+  uncomp <- results[results$completed == 0, ]
+  return(c(mean(comp$realPath), mean(uncomp$realPath)))
+}
+t <- matrix(NA, ncol = 2, nrow = 3)
+colnames(t) <- c("Completed", "Not Completed")
+rownames(t) <- c("Base Network", "Random Network", "Smart Network")
+
+t[1,] <- avgPath(baseResults)
+t[2,] <- avgPath(randomResults)
+t[3,] <- avgPath(smartResults)
+t
+
+```
+
+
+For completed games, look at mean difference in cyclefree path & shortest path.
+```{r, eval=F}
+t <- matrix(NA, ncol = 2, nrow = 3)
+rownames(t) <- c("Base Network", "Random Network", "Smart Network")
+colnames(t) <- c("Without Cycles", "With Cycles")
+
+compDiffnoCycles <- function(results){
+  comp <- results[results$completed == 1, ]
+  return(mean(comp$cyclefree - comp$realPath))
+}
+t[1,1] <- compDiffnoCycles(baseResults)
+t[2,1] <- compDiffnoCycles(randomResults)
+t[3,1] <- compDiffnoCycles(smartResults)
+
+all <- rbind(baseResults, randomResults, smartResults)
+compDiffnoCycles(all)
+compAll <-all[all$completed == 1, ]
+uncompAll <-all[all$completed == 0, ]
+summary(compAll$traveledPath)
+summary(uncompAll$traveledPath)
+
+compDiffwithCycles <- function(results){
+  comp <- results[results$completed == 1, ]
+  return(mean(comp$traveledPath - comp$realPath))
+}
+t[1,2] <- compDiffwithCycles(baseResults)
+t[2,2] <- compDiffwithCycles(randomResults)
+t[3,2] <- compDiffwithCycles(smartResults)
+t
+
+```
+
+Looking at shortest path lengths across networks, separated by completion
+```{r, eval=F}
+shortestPathsBase <- shortest.paths(netBase, v=V(netBase), to=V(netBase))
+#hist(shortestPathsBase, breaks = 10, xlim = c(0,10))
+
+shortestPathsRandom <- shortest.paths(netRandom, v=V(netRandom), to=V(netRandom))
+#hist(shortestPathsRandom, breaks = 10, xlim = c(0,10))
+
+shortestPathsSmart <- shortest.paths(netSmart, v=V(netSmart), to=V(netSmart))
+#hist(shortestPathsSmart, breaks = 10, xlim = c(0,10))
+
+tab <- matrix(NA, nrow = 3, ncol = 3)
+rownames(tab) <- c("Base Network", "Random Network", "Smart Network")
+colnames(tab) <- c("Mean Path Length", "Diameter", "Mean Degree")
+
+tab[,1] <- c(mean(shortestPathsBase), mean(shortestPathsRandom), mean(shortestPathsSmart))
+tab[,2] <- c(max(shortestPathsBase), max(shortestPathsRandom), max(shortestPathsSmart))
+tab[,3] <- c(mean(degree(netBase)), mean(degree(netRandom)), mean(degree(netSmart)))
+tab
+```
+
+Looking at mean traveled path vs completion - how far do people go before giving up?
+People who won went longer! except in smart network
+```{r, eval=F}
+avgTravel <- function(results){
+  comp <- results[results$completed == 1, ]
+  uncomp <- results[results$completed == 0, ]
+  return(c(mean(comp$traveledPath), mean(uncomp$traveledPath)))
+}
+
+t <- matrix(NA, ncol = 2, nrow = 3)
+colnames(t) <- c("Completed", "Not Completed")
+rownames(t) <- c("Base Network", "Random Network", "Smart Network")
+
+t[1,] <- avgTravel(baseResults)
+t[2,] <- avgTravel(randomResults)
+t[3,] <- avgTravel(smartResults)
+t
+
+```
+
+Looking at different centrality metrics of the source & target nodes
+```{r, eval=F}
+eCent <- eigen_centrality(netSmart)
+eCent["PSYC162"]
+
+bCent <- betweenness(netSmart)
+bCent["PSYC162"]
+
+
+```
+
+Looking at betweenness centrality scores of source/target in all, then split by completion
+
+```{r, eval=F}
+t <- matrix(NA, ncol = 3, nrow = 3)
+colnames(t) <- c("All", "Completed", "Not Completed")
+rownames(t) <- c("Base Network", "Random Network", "Smart Network")
+
+avgBCent <- function(results, net){
+  bCent <- betweenness(net)
+  comp <- results[results$completed == 1, ]
+  uncomp <- results[results$completed == 0, ]
+  
+  bAll <- mean(mean(bCent[results$sourceName]), mean(bCent[results$targetName]))
+  bComp <- mean(mean(bCent[comp$sourceName]), mean(bCent[comp$targetName]))
+  bUncomp <- mean(mean(bCent[uncomp$sourceName]), mean(bCent[uncomp$targetName]))
+  return(c(bAll, bComp, bUncomp))
+}
+
+t[1,] <- avgBCent(baseResults, netBase)
+t[2,] <- avgBCent(randomResults, netRandom)
+t[3,] <- avgBCent(smartResults, netSmart)
+
+t
+## double WTF
+```
+
+
+```{r, eval=F}
+mean(baseResults$duplicates)
+mean(randomResults$duplicates)
+mean(smartResults$duplicates)
+```
+
+
+
+

@@ -1,0 +1,121 @@
+---
+title: "scraping"
+output: word_document
+---
+
+This reads in all of the .json files that have the course information. 
+
+NOTE: API keys used have been redacted.
+```{r eval=FALSE}
+library(rjson)
+
+system('curl -X GET -v "https://gw.its.yale.edu/soa-gateway/course/webservice/subjects?apiKey=***&termcode=201701" | python -m json.tool > courses.json')
+
+depts<-unlist(fromJSON(file='courses.json'))
+
+baseCommand <- 'curl -X GET -v "https://gw.its.yale.edu/soa-gateway/course/webservice/index?apiKey=***&termcode=201701&subjectCode="'
+endCommand <- ' | python -m json.tool > '
+
+for(i in seq(from=1,by=2,length.out = length(depts)/2)){
+  fileName<-paste(gsub("&","",depts[i]),".json",sep="")
+  depts[i] <- gsub("&", "%26", depts[i], fixed=T)
+  systemCommand<-paste(baseCommand,depts[i],endCommand,fileName,sep="")
+  system(systemCommand)
+}
+```
+Information wanted from JSON files:
+$courseNumber
+$department
+$courseTitle (& $shortTitle)
+$description
+
+For cross-listings:
+$primXLst
+$scndXLst
+
+```{r echo=TRUE, eval=FALSE}
+## let's read in all of the JSON files
+library(rjson)
+#setwd("~/Desktop/senior fall/Math Thesis/JSON")
+jsonFiles <- list.files()
+
+## making the course data frame
+courses <- as.data.frame(matrix(NA, nrow=10, ncol=12))
+colnames(courses) <- c("Dept1", "Title", "Description",
+                       "Dept2", "Dept3", 
+                       "Dept4", "Dept5", "Dept6",
+                       "Dept7", "Dept8", "Dept9", "Dept10")
+
+courseLoop <- 0
+for(i in 1:length(jsonFiles)){
+  if(file.size(jsonFiles[i])==0) next #skipping empty files (0 bytes)
+  file <- fromJSON(file=jsonFiles[i]) 
+  if(length(file)==0) next # skiping empty files (3 bytes)
+  
+  for(j in 1:length(file)){
+    # checking to see if course is new to dataframe
+    if(length(which(file[[j]]$subjectNumber == courses$Dept1 |
+                    file[[j]]$subjectNumber == courses$Dept2 |
+                    file[[j]]$subjectNumber == courses$Dept3 |
+                    file[[j]]$subjectNumber == courses$Dept4 |
+                    file[[j]]$subjectNumber == courses$Dept5 |
+                    file[[j]]$subjectNumber == courses$Dept6 |
+                    file[[j]]$subjectNumber == courses$Dept7 |
+                    file[[j]]$subjectNumber == courses$Dept8 |
+                    file[[j]]$subjectNumber == courses$Dept9 |
+                    file[[j]]$subjectNumber == courses$Dept10 )) == 0){
+        courseLoop <- courseLoop + 1
+        courses[courseLoop, 1:3] <- c(file[[j]]$subjectNumber, #subjectNumber
+                                    file[[j]]$courseTitle,
+                                    file[[j]]$description)
+        ## adding cross-listed if need be
+        if(length(file[[j]]$scndXLst)>0){
+          col <- min(which(is.na(courses[courseLoop,]))) #first NA in row
+          for(cross in 1:length(file[[j]]$scndXLst)){
+            courses[courseLoop,col+cross-1] <- file[[j]]$scndXLst[cross]
+          }
+        }
+        ## add primXLst if not in row
+        if(!is.null(file[[j]]$primXLst)){
+          col <- min(which(is.na(courses[courseLoop,]))) #first NA in row
+          if(!(file[[j]]$primXLst %in% courses[courseLoop,])){ #if it's not already added
+            courses[courseLoop,col] <- file[[j]]$primXLst
+          }
+        }
+        
+    } else { #if course is in df, do nothing! 
+      }
+  }
+}
+```
+
+```{r echo=FALSE, eval=FALSE}
+## integrity check:
+## pull all course titles; look for presence in data frame
+titles <- c()
+courseLoop <- 0
+for(i in 1:length(jsonFiles)){
+  if(file.size(jsonFiles[i])==0) next #skipping empty files (0 bytes)
+  file <- fromJSON(file=jsonFiles[i]) 
+  if(length(file)==0) next # skiping empty files (3 bytes)
+  
+  for(j in 1:length(file)){
+    titles <- c(titles, file[[j]]$courseTitle)
+  }}
+
+## check for titles in data frame
+check = 0 
+for(i in 1:length(titles)){
+  if(!(titles[i] %in% courses$Title)){
+    cat(titles[i])
+  }
+  else {check = check + 1}
+}
+
+length(unique(courses$Title))
+dups <- courses[which(duplicated(courses$Title)),]
+
+```
+
+
+

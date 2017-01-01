@@ -1,0 +1,335 @@
+---
+title: "similarity network"
+output: word_document
+---
+```{r echo=FALSE, eval=FALSE}
+setwd("~/Box Sync/senior fall/Math Thesis")
+courses <- read.csv("courses.csv", as.is=TRUE)
+courses <- courses[,-1]
+```
+
+We want to remove senior-only major classes. We will do so by creating a list of words, of which two appear in these "senior" classes, and removing them from the courses.csv file. 
+```{r echo=FALSE, eval=FALSE}
+## looking at words with two words from "senior" list
+#courses <- read.csv("courses.csv", as.is=TRUE)
+pairWords <- c("independent", "study", "senior", "project", "projects", "individual", "studies", "research", "special", "reading", "essay", "directed", "seminar", "topics", "colloquium", "junior", "tutorial")
+
+titles <- courses$Title
+titlesToRemove <- c()
+for(i in 1:length(titles)){
+  titleWords <- unlist(strsplit(titles[i], " ")) # split title into words
+  titleWords <- tolower(titleWords) # make lower case
+  if(length(intersect(titleWords, pairWords)) >= 2){
+    titlesToRemove <- c(titlesToRemove, titles[i])
+  }
+}
+
+## removing the courses if they match
+for(i in 1:length(titlesToRemove)){
+  row <- which(courses$Title == titlesToRemove[i])
+  if(length(row) > 0) courses <- courses[-row,]
+}
+
+```
+
+This code looks at most common words in all descriptions. This was used to create a list of words for the Shiny application, where people voted on the word's potency to illuminate what the course (that contains said word) is about. 
+```{r echo=FALSE, eval=FALSE}
+words <- c()
+for(i in 1:nrow(courses)){
+  words <- c(words, strsplit(courses$Description[i], " "))
+}
+words <- unlist(words,recursive=FALSE) # make one big list
+words <- gsub("\\<[^\\]]*\\>", "", words, perl=TRUE) # removing anything between < >
+words <- gsub("\n","",words) # removing \n notation
+
+words <- unlist(strsplit(words, "&#160;"), recursive=FALSE) # splitting words by weird &#160; notation (also removes it)
+words <- words[-grep("http:", words)] # removing anything with http://
+
+words <- gsub("(?!-)[[:punct:]]", "", words, perl=TRUE) # removing punctuation except hyphens
+words <- tolower(words) #make lower case
+
+# remove stopwords
+stop <- read.csv("stopwords.csv", as.is=T)
+for(i in 1:nrow(stop)) {
+  rows <- which(words == stop[i,1])
+  if(length(rows) == 0) next
+  words <- words[-rows]
+}
+#sort(table(words),decreasing=TRUE)[1:1000]
+```
+
+This creates the keyword list for each course, after removing the generic stop words and the words voted on from the Shiny application. 
+```{r, eval=FALSE}
+stopWords<- read.csv("stopwords.csv", as.is=T)
+toRemove <- read.csv("wordsToRemove.csv", as.is=T)
+toRemove <- toRemove[,3]
+toRemove <- unique(toRemove)
+
+## function that takes description and returns keywords
+keepKeywords <- function(descrip){
+  words <- strsplit(descrip, " ")
+  words <- unlist(words,recursive=FALSE) # make one big list
+  #splitting and removing weird string
+  for(i in 1:length(words)){
+    if(length(grep("&#160;",words[i])) > 0){
+      words <- c(words,gsub( "&#160;.*$", "", words[i])) #before character
+      words <- c(words,gsub( ".*&#160;", "", words[i])) #after character
+      words <- words[-i] #string with character
+    }
+  }
+  words <- gsub("\\<[^\\]]*\\>", "", words, perl=TRUE) # removing anything between < > -- merges words!! 636
+  words <- gsub("\n","",words) # removing \n notation
+  words <- gsub("[[:punct:]]","",words) # removing punctuation
+  words <- tolower(words) #make lower case
+  # removing stopwords
+  for(i in 1:nrow(stopWords)) {
+    rows <- which(words == stopWords[i,1])
+    if(length(rows) == 0) next
+    words <- words[-rows]
+  }
+  ## removing confimed bad words
+  for(i in 1:length(toRemove)) {
+    rows <- which(words == toRemove[i])
+    if(length(rows) == 0) next
+    words <- words[-rows]
+  }
+  
+  ## remove duplicates
+  words <- unique(words)
+
+  # returning keywords, collapsed into single string - OR RETURN AS LIST??
+  return(paste(words, collapse = ' '))
+}
+
+courses$Keywords <- NA
+for(j in 1:nrow(courses)){
+  courses$Keywords[j] <- keepKeywords(courses$Description[j])
+}
+
+```
+
+Removing language courses that only contain the keywords "continuation", a department code (e.g. "SPAN"), and a course number. 
+```{r looking at language courses, eval=FALSE}
+rows <- c()
+for(i in 1:nrow(courses)){
+  if(length(unlist(strsplit(courses$Keywords[i], " ")))==3){
+    rows <- c(rows, i)
+  }
+}
+#length(rows)
+#courses[rows,]
+## taking out these rows!
+courses <- courses[-rows, ]
+
+#write.csv(courses, "newCourses.csv")
+```
+
+This chunk find the course with the most keywords - 57!
+```{r echo=FALSE, eval=FALSE}
+sapply(gregexpr("\\W+", courses$Keywords[1]), length) + 1 # count number of words in string
+
+max <- 0
+for(i in 1:nrow(courses)){
+  words <- sapply(gregexpr("\\W+", courses$Keywords[i]), length) + 1 
+  if(words > max){
+    max <- words
+    index <- i
+  }
+}
+courses$Keywords[index]
+```
+
+This makes an adjacency matrix between all pairs of classes using the Jaccard index.  
+```{r echo=FALSE, eval=FALSE}
+n <- nrow(courses)
+adj <- matrix (NA, nrow=n, ncol=n)
+rownames(adj) <- courses$Dept1
+colnames(adj) <- courses$Dept1
+
+for(row in 1:(n-1)){
+  rowList <- unlist(strsplit(courses$Keywords[row], " "))
+  for(col in (row+1):n){
+    if(row == col) next
+     colList <- unlist(strsplit(courses$Keywords[col], " "))
+     if((length(intersect(rowList, colList)) / length(union(rowList, colList))) == 1){
+       adj[row, col] <- NA
+       adj[col, row] <- NA
+     } else{
+       adj[row, col] <- length(intersect(rowList, colList)) / length(union(rowList, colList))
+       adj[col, row] <- length(intersect(rowList, colList)) / length(union(rowList, colList))
+     }
+  }
+}
+
+```
+
+This explores very similar courses and looks at their department codes and numbers. 
+```{r echo=FALSE, eval=FALSE}
+max(adj, na.rm=T)
+mean(adj, na.rm=T) #very small!
+median(adj, na.rm=T) #more similarities of 0 than anything else
+
+#large <- which(adj >= .3 & adj >= .5, arr.ind = TRUE)
+large <- which(adj >= .6, arr.ind = TRUE) 
+sim <- as.data.frame(matrix(NA, ncol=4, nrow = nrow(large)))
+colnames(sim) <- c("Dept1", "Dept1Title", "Dept2", "Dept2Title")
+for(i in 1:nrow(large)){
+  sim$Dept1[i] <- rownames(adj)[large[i,1]]
+  sim$Dept2[i] <- colnames(adj)[large[i,2]]
+  
+  sim$Dept1Title[i] <- courses$Title[which(courses$Dept1 == rownames(adj)[large[i,1]])]
+  sim$Dept2Title[i] <- courses$Title[which(courses$Dept1 == colnames(adj)[large[i,2]])]
+}
+
+#write.csv(sim, "highSim.csv")
+
+hist(adj)
+hist( adj[adj > 0.1] ,
+      main = "Histogram of Similarity Scores (>0.1)",
+      xlab = "Jaccard Index",
+      xlim = c(0,1))
+```
+
+This looks at similarity scores within each department.
+```{r echo=FALSE, eval=FALSE}
+## pulling all unique dept codes
+depts <- unique(gsub("[[:digit:]]", "", colnames(adj)))
+
+withinScores <- matrix(NA, nrow = length(depts), ncol = 1)
+colnames(withinScores) <- c("Score")
+rownames(withinScores) <- depts
+
+## looking at each unique dept
+for(i in 1:length(depts)){
+  matches <- adj[grep(depts[i], rownames(adj)), grep(depts[i], colnames(adj))]
+  withinScores[i] <- mean(matches, na.rm=TRUE)
+}
+
+withinScores[which(is.nan(withinScores))] <- NA
+```
+
+This makes the betweenMax & betweenMean matrices.
+```{r echo=FALSE, eval=FALSE}
+# looking between departments
+depts <- unique(gsub("[[:digit:]]", "", colnames(adj)))
+
+betweenMax <- matrix(NA, nrow = length(depts), ncol = length(depts))
+colnames(betweenMax) <- depts
+rownames(betweenMax) <- depts
+
+betweenMean <- matrix(NA, nrow = length(depts), ncol = length(depts))
+colnames(betweenMean) <- depts
+rownames(betweenMean) <- depts
+
+## look at mean similarity between courses
+for(i in 1:(length(depts)-1)){
+  for(j in (i+1):length(depts)){
+    matches <- adj[, grep(depts[i], colnames(adj))]
+    if(is.null(dim(matches))){ 
+      next }
+    matches <- matches[grep(depts[j], rownames(matches)), ] ##
+    if(length(matches) == 0){ 
+      next }
+    ## storing mean & max
+    betweenMax[i,j] <- max(matches, na.rm = T)
+    betweenMax[j,i] <- max(matches, na.rm = T)
+    betweenMean[i,j] <- mean(matches, na.rm = T)
+    betweenMean[j,i] <- mean(matches, na.rm = T)
+  }
+}
+
+betweenMax <- as.data.frame(betweenMax)
+betweenMean <- as.data.frame(betweenMean)
+
+max(betweenMean, na.rm=T)
+
+```
+
+Let's look at different incremental cut-off values and network attributes.
+```{r echo=FALSE, eval=FALSE}
+library(igraph)
+stats <- matrix(NA, nrow = 1, ncol = 4)
+colnames(stats) <- c("Cutoff", "Isolated", "Max Degree", "Mean Degree")
+stats <- as.data.frame(stats)
+counter <- 1
+
+for(i in 1:50){
+  Adj <- adj >= (i * .01)
+  net <- graph_from_adjacency_matrix(Adj, mode="undirected")
+  stats[counter,] <- c(i*.01, 
+                       sum(degree(net)==0),
+                       max(degree(net)),
+                       mean(degree(net)))
+  counter <- counter + 1
+  
+}
+stats
+## logistic growth of isolated node number 
+plot(stats$Cutoff,stats$Isolated, pch=16,
+     main="Number of Isolated Nodes by Cutoff Score",
+     xlab = "Jaccard Index Cutoff Score",
+     ylab = "Number of Isolated Nodes")
+lines(stats$Cutoff,stats$Isolated)
+
+plot(stats$Cutoff,stats$`Mean Degree`, pch=16,
+     main="Mean Degree by Cutoff Score",
+     xlab = "Jaccard Index Cutoff Score",
+     ylab = "Mean Degree of Network")
+lines(stats$Cutoff,stats$`Mean Degree`)
+
+plot(stats$Cutoff,stats$`Max Degree`, pch=16,
+     main="Max Degree by Cutoff Score",
+     xlab = "Jaccard Index Cutoff Score",
+     ylab = "Max Degree in Network")
+lines(stats$Cutoff,stats$`Max Degree`)
+
+```
+
+Same process, but focus in on a cutoff score of 0.05 - 0.08.
+```{r echo=FALSE, eval=FALSE}
+library(igraph)
+stats <- matrix(NA, nrow = 1, ncol = 4)
+colnames(stats) <- c("Cutoff", "Isolated", "Max Degree", "Mean Degree")
+stats <- as.data.frame(stats)
+counter <- 1
+
+for(i in 1:30){
+  val <- i * .001 + 0.049
+  Adj <- adj >= val
+  net <- graph_from_adjacency_matrix(Adj, mode="undirected")
+  stats[counter,] <- c(val, 
+                       sum(degree(net)==0),
+                       max(degree(net)),
+                       mean(degree(net)))
+  counter <- counter + 1
+  
+}
+
+## same plots!
+plot(stats$Cutoff,stats$Isolated, pch=16,
+     main="Number of Isolated Nodes by Cutoff Score",
+     xlab = "Jaccard Index Cutoff Score",
+     ylab = "Number of Isolated Nodes")
+lines(stats$Cutoff,stats$Isolated)
+
+plot(stats$Cutoff,stats$`Mean Degree`, pch=16,
+     main="Mean Degree by Cutoff Score",
+     xlab = "Jaccard Index Cutoff Score",
+     ylab = "Mean Degree of Network")
+lines(stats$Cutoff,stats$`Mean Degree`)
+
+plot(stats$Cutoff,stats$`Max Degree`, pch=16,
+     main="Max Degree by Cutoff Score",
+     xlab = "Jaccard Index Cutoff Score",
+     ylab = "Max Degree in Network")
+lines(stats$Cutoff,stats$`Max Degree`)
+
+Adj <- adj >= 0.05
+net <- graph_from_adjacency_matrix(Adj, mode="undirected")
+plot(net,
+     vertex.size = 1,
+     vertex.label = "")
+
+
+```
+

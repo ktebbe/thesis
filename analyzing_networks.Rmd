@@ -1,0 +1,96 @@
+---
+title: "analyzing networks"
+output: word_document
+---
+
+reading in networks
+```{r, eval=F}
+library(igraph)
+setwd("~/Box Sync/senior fall/Math Thesis/Shiny smart")
+netSmart <- read_graph("networkDist.txt", format = "ncol", directed=FALSE)
+
+setwd("~/Box Sync/senior fall/Math Thesis/Shiny random")
+netRandom <- read_graph("networkRandom.txt", format = "ncol", directed=FALSE)
+
+setwd("~/Box Sync/senior fall/Math Thesis/Shiny")
+netBase <- read_graph("network.txt", format = "ncol", directed=FALSE)
+
+```
+
+making a cumulative sum graph of degree distribution of three networks 
+```{r, eval=F}
+cumsumValues <- function(net){
+  a<-table(degree(net))
+  a<-cumsum(a)
+  a <- a / a[length(a)]
+  return(a)
+}
+a<-cumsumValues(netBase)
+b<-cumsumValues(netSmart)
+c<-cumsumValues(netRandom) 
+
+plot(y=c(0,0,a),
+     x=0:11,
+     ylim = c(0,1),
+     xlim =c(0,11),
+     xaxt="n", ylab="Proportion of Nodes",
+     main ="Cumulative Sum of Degrees in the Three Networks",
+     xlab="Degree")
+axis(1,at = 0:11,0:11)
+
+lines(x= 0:11,
+      y = c(0,0,a))
+points(c(0,0,b),x=0:11,pch=16)
+lines(x= 0:11,
+      y = c(0,0,b))
+points(y=c(0,0,c),
+       x= 0:11,pch=17)
+lines(x= 0:11,
+      y = c(0,0,c))
+
+legend("topleft", c("Base Network", "Random Network", "Smart Network"),
+       pch = c(1, 16, 17), cex=0.9, bty='n')
+
+```
+
+Similar plot, but not cumulative - plot the proportion that each degree represents
+```{r, eval=F}
+a <- table(degree(netBase))/880
+b <- table(degree(netSmart))/880
+c <- table(degree(netRandom))/880
+
+plot(y=c(0,0,a),
+     x=0:11,
+     ylim = c(0,.5),
+     xlim =c(0,11),
+     xaxt="n", ylab="Proportion of Nodes",
+     main ="Proportion of Each Degree in the Three Networks",
+     xlab="Degree")
+axis(1,at = 0:11,0:11)
+
+lines(x= 0:11,
+      y = c(0,0,a))
+points(c(0,0,b),x=0:11,pch=16)
+lines(x= 0:11,
+      y = c(0,0,b))
+points(y=c(0,0,c),
+       x= 0:11,pch=17)
+lines(x= 0:11,
+      y = c(0,0,c))
+
+legend("topleft", c("Base Network", "Random Network", "Smart Network"),
+       pch = c(1, 16, 17), cex=0.9, bty='n')
+
+```
+
+
+```{r, eval=F}
+
+## weird
+baseCent <- mean(betweenness(netBase))
+randomCent <- mean(betweenness(netRandom))
+smartCent <- mean(betweenness(netSmart))
+
+```
+
+

@@ -1,0 +1,67 @@
+---
+title: "adding random"
+output: word_document
+---
+
+To add the 276 random edges: randomly sample two nodes:
+-if connected, skip
+-if one/both of the nodes have degree 11, remove one edge (unless makes min degree 1)
+-else --> connect them!
+-do until 267 successful additions
+
+```{r, eval=FALSE}
+net <- read_graph("network.txt", format = "ncol", directed=FALSE)
+## number of edges
+edgesBefore <- gsize(net)
+
+numToAdd <- 286
+counter <- 0
+set.seed(2)
+while(counter < numToAdd){
+  ## randomly sample two nodes 
+  nodes <- sample(V(net)$name, 2)
+  
+  ## proceed only if no edge already between
+  if(net[nodes[1], nodes[2]] == 0){
+    ## check degree -> if either = 11, remove random edge & replace w new one
+    if(degree(net, v = nodes[1]) == 11){
+      NOTDONE <- TRUE
+      while(NOTDONE){
+        index <- sample(c(1:11), 1)
+        test <- delete_edges(net, E(net)[from(nodes[1])][index])
+        if(min(degree(test)) == 2){
+          net <- delete_edges(net, E(net)[from(nodes[1])][index])
+          NOTDONE <- FALSE
+          counter <- counter - 1
+        }
+      }
+    }
+    if(degree(net, v = nodes[2]) == 11){
+      NOTDONE <- TRUE
+      while(NOTDONE){
+        index <- sample(c(1:11), 1)
+        test <- delete_edges(net, E(net)[from(nodes[2])][index])
+        if(min(degree(test)) == 2){
+          net <- delete_edges(net, E(net)[from(nodes[2])][index])
+          NOTDONE <- FALSE
+          counter <- counter - 1
+        }
+      }
+    }
+    ## add an edge!
+    net <- add.edges(net, c(nodes[1], nodes[2]))
+    counter <- counter + 1
+  }
+}
+
+edgesAfter <- gsize(net)
+
+## validity check 
+edgesAfter - edgesBefore == numToAdd
+min(degree(net)) == 2
+max(degree(net)) <= 11
+
+## write!
+#write_graph(net, "networkRandom.txt", "ncol")
+```
+
